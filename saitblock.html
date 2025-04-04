@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="kz">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Лотерея: Санды тап</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: auto; padding: 2rem; }
+    button { padding: 0.5rem 1rem; margin-top: 1rem; }
+    input { padding: 0.5rem; margin: 0.25rem 0; width: 100%; }
+    .admin-panel { background: #f4f4f4; padding: 1rem; margin-top: 2rem; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <h1>🎯 Лотерея: Санды тап</h1>
+  <button id="connectButton">🔌 MetaMask-қа қосылу</button>
+  <p><strong>maxPrize:</strong> <span id="maxPrize">—</span> wei</p>
+
+  <h3>🎮 Ойын ойнау</h3>
+  <input id="guessInput" type="number" placeholder="Сіздің болжауыңыз (0-99)" />
+  <input id="ethInput" type="number" placeholder="ETH (мысалы, 0.001)" step="0.0001" />
+  <button id="playButton">Ойнау</button>
+  <p id="playResult"></p>
+  <p id="rewardAmount" style="font-weight:bold;"></p>
+
+  <div class="admin-panel hidden" id="adminPanel">
+    <h3>🛠 Админ панелі</h3>
+    <p><strong>Контракт балансы:</strong> <span id="contractBalance">—</span> wei</p>
+
+    <input id="newMaxPrize" type="number" placeholder="Жаңа maxPrize (wei)" />
+    <button id="updateMaxPrizeButton">maxPrize өзгерту</button>
+
+    <input id="newHiddenNumber" type="number" placeholder="Жаңа жасырын сан (0-99)" />
+    <button id="updateHiddenButton">Жасырын санды өзгерту</button>
+
+    <button id="withdrawButton">💸 Қаражат шығару</button>
+    <p id="adminMessage"></p>
+  </div>
+
+  <script>
+    const contractAddress = "0xcaaD2bC738649b653cF6A711B42FcbC803384c8c";
+    const abi = [
+      "function getMaxPrize() view returns (uint)",
+      "function play(uint guess) payable",
+      "function owner() view returns (address)",
+      "function updateMaxPrize(uint newMaxPrize)",
+      "function updateHiddenNumber(uint newHiddenNumber)",
+      "function withdraw()",
+      "function getBalance() view returns (uint)"
+    ];
+
+    let signer, contract, currentAccount;
+
+    async function connectWallet() {
+      if (!window.ethereum) {
+        alert("MetaMask орнатылмаған!");
+        return;
+      }
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      await window.ethereum.request({ method: "eth_requestAccounts" });
+      signer = provider.getSigner();
+      currentAccount = await signer.getAddress();
+      contract = new ethers.Contract(contractAddress, abi, signer);
+
+      document.getElementById("connectButton").disabled = true;
+      updateInfo();
+    }
+
+    async function updateInfo() {
+      const maxPrize = await contract.getMaxPrize();
+      document.getElementById("maxPrize").innerText = maxPrize;
+
+      const owner = await contract.owner();
+      if (owner.toLowerCase() === currentAccount.toLowerCase()) {
+        document.getElementById("adminPanel").classList.remove("hidden");
+        const balance = await contract.getBalance();
+        document.getElementById("contractBalance").innerText = balance;
+      }
+    }
+
+    document.getElementById("connectButton").onclick = connectWallet;
+
+    document.getElementById("playButton").onclick = async () => {
+      const guess = document.getElementById("guessInput").value;
+      const eth = document.getElementById("ethInput").value;
+      const button = document.getElementById("playButton");
+      const result = document.getElementById("playResult");
+      const rewardInfo = document.getElementById("rewardAmount");
+
+      if (!guess || !eth) return alert("Сан және ETH енгізіңіз");
+
+      button.disabled = true;
+      result.innerText = "⏳ Транзакция орындалып жатыр...";
+      rewardInfo.innerText = "";
+
+      try {
+        const tx = await contract.play(guess, {
+          value: ethers.utils.parseEther(eth)
+        });
+        await tx.wait();
+
+        result.innerText = "🎉 Жеңіс! Сіз дұрыс таптыңыз!";
+        const reward = Math.min(
+          ethers.utils.parseEther(eth).mul(2),
+          await contract.getMaxPrize()
+        );
+        rewardInfo.innerText = `💰 Сіз ұттыңыз: ${ethers.utils.formatEther(reward)} ETH`;
+      } catch (err) {
+        if (err.message.includes("execution reverted")) {
+          result.innerText = "😞 Жеңіліс. Қате сан.";
+        } else {
+          result.innerText = "❌ Қате: " + err.message;
+        }
+      }
+
+      button.disabled = false;
+    };
+
+    document.getElementById("updateMaxPrizeButton").onclick = async () => {
+      const val = document.getElementById("newMaxPrize").value;
+      const button = document.getElementById("updateMaxPrizeButton");
+      const msg = document.getElementById("adminMessage");
+
+      if (!val) return alert("maxPrize енгізіңіз");
+      button.disabled = true;
+      try {
+        const tx = await contract.updateMaxPrize(val);
+        await tx.wait();
+        msg.innerText = "✅ maxPrize жаңартылды";
+      } catch (err) {
+        msg.innerText = "❌ maxPrize қатесі: " + err.message;
+      }
+      button.disabled = false;
+    };
+
+    document.getElementById("updateHiddenButton").onclick = async () => {
+      const val = document.getElementById("newHiddenNumber").value;
+      const button = document.getElementById("updateHiddenButton");
+      const msg = document.getElementById("adminMessage");
+
+      if (!val) return alert("Сан енгізіңіз");
+      button.disabled = true;
+      try {
+        const tx = await contract.updateHiddenNumber(val);
+        await tx.wait();
+        msg.innerText = "✅ Жасырын сан жаңартылды";
+      } catch (err) {
+        msg.innerText = "❌ Қате: " + err.message;
+      }
+      button.disabled = false;
+    };
+
+    document.getElementById("withdrawButton").onclick = async () => {
+      const button = document.getElementById("withdrawButton");
+      const msg = document.getElementById("adminMessage");
+      button.disabled = true;
+      try {
+        const tx = await contract.withdraw();
+        await tx.wait();
+        msg.innerText = "✅ Қаражат сәтті шығарылды";
+      } catch (err) {
+        msg.innerText = "❌ Қате: " + err.message;
+      }
+      button.disabled = false;
+    };
+  </script>
+</body>
+</html>
